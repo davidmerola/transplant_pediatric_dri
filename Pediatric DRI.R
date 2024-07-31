@@ -109,11 +109,7 @@ miss_vals_dims <- function(mat) {
 # data_liver <- read_dta(paste0(DIR_RAW_DATA, "Liver/LIVER_DATA.DTA"))
 # save(data_liver, file = paste0(DIR_DATA, "liver_data.RData"))
 
-# data_deceased_donor <- read_dta(paste0(DIR_RAW_DATA, "Deceased Donor/DECEASED_DONOR_DATA.DTA"))
-# save(data_deceased_donor, file = paste0(DIR_DATA, "data_deceased_donor.RData"))
-
 # Load .RData files
-# load(file = paste0(DIR_DATA, "data_deceased_donor.RData"))
 load(file = paste0(DIR_DATA, "liver_data.RData"))
 
 formats <- read.delim(paste0(DIR_FORMATS, "LIVER_FORMATS_FLATFILE.DAT"), 
