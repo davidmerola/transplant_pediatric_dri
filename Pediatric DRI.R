@@ -2,7 +2,7 @@
 # Author: Dave Merola
 # Date Created: 06-19-2024
 # Description: Construction and testing of prediction models for graft failure
-# in pediatric patients using the UNOS data.
+# and mortality in pediatric liver transplant patients using the UNOS data.
 
 rm(list = ls())
 
@@ -11,7 +11,7 @@ rm(list = ls())
 DIR_RAW_DATA <- "~/OneDrive/Research/UNOS Data/STAR_STATA/SAS Export to STATA 202403/"
 DIR_FORMATS <- "~/OneDrive/Research/UNOS Data/STAR_STATA/CODE DICTIONARY - FORMATS 202403/Liver/"
 DIR_DATA <- "~/OneDrive/Research/Transplant DRI/Data/"
-DIR_OUTPUT <- "Library/CloudStorage/OneDrive-Personal/Research/Transplant DRI/Output/"
+DIR_OUTPUT <- "~/OneDrive/Research/Transplant DRI/Output/"
 
 # Load Libraries ----
 library(tableone)
@@ -38,6 +38,7 @@ perf_metrics <- function(obs, pred, cutoff) {
   # Output: Returns a vector containing the cutoff, sensitivity, specificity,
   #         PPV, NPV, F1 score, and MCC
   
+  # A quality control step
   if((length(obs) == length(pred)) == FALSE) {
     print("ERROR: OBSERVED & PREDICTED VECTORS HAVE DIFFERENT LENGTHS")
     stop()
@@ -102,6 +103,52 @@ miss_vals_dims <- function(mat) {
   return(missing_indices)
 }
 
+marginal_prob <- function(data, model, vars_marg, vars_sum) {
+  
+  # Description: This function estimates the marginalized probability for each 
+  #              observation of a dataset. Variables in "vars_marg" argument
+  #              are 'fixed' and variables in "vars_sum" argument are summed over.
+  # 
+  # Arguments: data: an object of class data.frame containing all variables of interest
+  #            model: an object of class glm that has been fit to the data frame 
+  #                   specified in the 'data' argument
+  #            vars_marg: a character vector containing the variable name(s) in 
+  #                       'data' in which marginal effects are desired
+  #            vars_sum: a character vector containing the variable name(s) in 
+  #                       'data' in which we wish to sum (marginalize) over
+  # 
+  # Output: A numeric vector of probabilities is returned that has a length  
+  #         corresponding to the number of observations in the data provided to 
+  #         the function.
+  
+  # Loop through each observation
+  
+  for (i in 1:nrow(data)){
+    
+    # Print progress indicator
+    print(paste0("Row No. ", i, " of ", nrow(data)))
+    
+    # Create a new data frame that contains 1) fixed values for the variables  
+    # whose marginal effect we are interested in and 2) values of the variables
+    # we will be summing over
+    data_fixed_i <- data
+    data_fixed_i[vars_marg] <- data_fixed_i[vars_marg][i, ]
+    
+    # Predict the probabilities using the original logistic regression model and 
+    # take mean
+    mean_pred_i <- mean(predict(model, newdata = data_fixed_i, type = "response"))
+    
+    # Store mean of the predicted values in vector
+    if (i == 1){
+      mean_pred <- rep(NA, nrow(data))
+    }
+    
+    mean_pred[i] <- mean_pred_i
+    
+  }
+  
+  return(mean_pred)
+}
 
 # Load Data ----
 
@@ -988,41 +1035,40 @@ coef_names <- rownames(coef_lasso_logit)[coef_lasso_logit[,1] != 0]
 paste(coef_names, collapse = " + ")
 
 #### Model Fit ----
-# Note: Removed ethnicity, recuscit, MI, HTN, drug intoxication, CNS tumor, 
-# variables due to sparsity. If one dummy from a factor
-# was selected by LASSO, then entire factor was included in this model.
-model_mle_logit <- glm(outcome ~ cov_arginine_don + cov_artificial_li_trr + 
+# Note: Removed 'commented out' variables due to sparsity. If one dummy from 
+# a factor was selected by LASSO, then entire factor was included in this model.
+model_mle_logit <- glm(outcome ~ cov_arginine_don + #cov_artificial_li_trr + 
                          cov_ascites_tx + cov_blood_inf_don + 
                          cov_bmi_tcr + cov_bmi_don_calc + 
                          cov_bun_don + #cov_cod_cad_don + 
                          cov_cold_isch + cov_death_circum_don + 
-                         #cov_death_mech_don + 
+                         cov_death_mech_don + 
                          cov_diag + 
                          cov_ebv_serostatus + cov_enceph_tx + 
-                         #cov_ethcat + 
+                         cov_ethcat + 
                          cov_func_stat_trr + 
-                         cov_gender + cov_hist_cocaine_don + 
-                         #cov_hist_hypertens_don + #cov_history_mi_don + 
+                         cov_gender + #cov_hist_cocaine_don + 
+                         cov_hist_hypertens_don + #cov_history_mi_don + 
                          cov_inr_tx + cov_life_sup_trr + 
                          cov_med_cond_trr + 
                          cov_meld_peld_lab_score + 
                          cov_protein_urine + cov_pt_steroids_don + 
                          cov_pt_t4_don + cov_pulm_inf_don + 
-                         #cov_recuscit_dur + 
+                         cov_recuscit_dur + 
                          cov_sgot_don + 
                          cov_sgpt_don + cov_tattoos + cov_tbili_don + 
                          cov_tx_procedur_ty + cov_urine_inf_don + 
                          cov_vasodil_don + cov_share_ty + cov_age + 
                          cov_age_don,
                        family = binomial(link = 'logit'),
-                       data = data_test)
+                       data = data_train)
 
 summary(model_mle_logit)
 
 # Predict TEST data
 pred_mle_logit <- predict(model_mle_logit, 
                             type = 'response',
-                            newx = data_test_x) 
+                            newdata = data_test) 
 
 #### Extract Coefficients ----
 coef_mle_logit <- as.matrix(coef(model_mle_logit))
@@ -1059,8 +1105,9 @@ performance_hosmer(model_mle_logit, n_bins = 10)
 model <- "MLE Logit"
 perf_mle_logit <- cbind(model, metrics_mle_logit_optimal, as.data.frame(auc))
 
-# AUROC plot
-fig_auc_mle_logit <-ggplot(data = as.data.frame(metrics_mle_logit), 
+
+## AUROC Plot for Final Model ----
+fig_auc_final_logit <-ggplot(data = as.data.frame(metrics_lasso_logit), 
        aes(x = 1 - specificity, y = sensitivity)) +
   geom_smooth(size = 0.5, col = 'gray', se = FALSE) + 
   geom_point(size = .2, alpha = 0.5) + 
@@ -1068,24 +1115,152 @@ fig_auc_mle_logit <-ggplot(data = as.data.frame(metrics_mle_logit),
   scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
   geom_abline(col = 'red') +
-  ggtitle("Area Under the ROC Curve - MLE Logit Model") + 
+  ggtitle("Area Under the ROC Curve - LASSO Logit Model") + 
   xlab("1 - Specificity") + ylab("Sensitivity") + 
   annotate("text", x = 0.1, y = 0.95, 
-           label = paste0("AUC: ", round(auc, 4)), size = 3, 
+           label = paste0("AUC: ", round(perf_lasso_logit$auc, 4)), size = 3, 
            color = "black", hjust = 0.5, vjust = 0.5)
 
-# Precision-recall plot
-fig_prerec_mle_logit <- ggplot(data = as.data.frame(metrics_mle_logit), 
+## Precision-Recall Plot for Best Model ----
+fig_prerec_final_logit <- ggplot(data = as.data.frame(metrics_lasso_logit), 
        aes(x = sensitivity, y = ppv)) +
   geom_smooth(size = 0.5, col = 'gray', se = FALSE) + 
   geom_point(size = .2, alpha = 0.5) + 
   theme_minimal() +
   scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
-  ggtitle("Precision vs. Recall Curve - MLE Logit Model") + 
+  ggtitle("Precision vs. Recall Curve - LASSO Logit Model") + 
   xlab("Sensitivity") + ylab("Positive Predictive Value")
 
+## Donor Risk Index ----
+#### Marginalized Donor Risk Model ----
+# This section sums over recipient factors in the MLE logit model so
+# that donor factor coefficients reflect the population as a whole
+
+# Create vector of donor factor variable names
+MLE_LOGIT_VARS <- names(model_mle_logit$model)
+MLE_LOGIT_DONOR_FACTORS <- c(grep("don", MLE_LOGIT_VARS, value = TRUE),
+                             "cov_cold_isch", # addt'l relevant donor factors
+                             "cov_share_ty", 
+                             "cov_tx_procedur_ty")
+
+MLE_LOGIT_RECIP_FACTORS <- names(model_mle_logit$model)[!names(model_mle_logit$model) %in% 
+                                                          c(MLE_LOGIT_DONOR_FACTORS, "outcome")]
+
+# Obtain vector of the means of expected values for each observation in the 
+# training dataset
+set.seed(576)
+marginal_probs <- marginal_prob(data = model_mle_logit$data, 
+                                model = model_mle_logit, 
+                                vars_marg = MLE_LOGIT_DONOR_FACTORS, 
+                                vars_sum = MLE_LOGIT_RECIP_FACTORS)
+
+# Use the above vector of probabilities to create a new binary response variable
+data_train_outcome_marg <- data_train %>% 
+  mutate(outcome_marg = rbinom(length(marginal_probs), 1, marginal_probs)) %>% 
+  select(pt_code, outcome, outcome_marg, everything())
+
+# Specify new model formula to obtain 'marginal' donor coefficients
+formula_marg_mle_logit <- as.formula(paste("outcome_marg ~", 
+                                           paste(MLE_LOGIT_DONOR_FACTORS, 
+                                                 collapse = " + ")))
+
+# Regress the new response variables on the donor factors only in training data
+model_mle_logit_marg <- glm(formula_marg_mle_logit, 
+                            data = data_train_outcome_marg, 
+                            family = binomial(link = 'logit'))
+
+# Summary of the new model
+summary(model_mle_logit_marg)
+
+##### Extract Coefficients ----
+coef_mle_logit_marg <- as.matrix(coef(model_mle_logit_marg))
+
+##### Estimate Donor Risk Score ----
+# Estimate donor risk score of patients in the test dataset
+donor_risk_index_test_data <- data_test %>% 
+  mutate(pred_probs = predict(model_mle_logit_marg, type = 'response', newdata = data_test),
+         pred_link = predict(model_mle_logit_marg, type = 'link', newdata = data_test),
+         dri = round(pred_link / 0.5),
+         n = 1,
+         pred_probs_quantile = ntile(pred_probs, 5)) %>% 
+  select(pt_code, n, outcome, pred_probs, pred_probs_quantile, pred_link, dri)
+
+# Estimate observed & predicted risk by quantile of predicted risk
+donor_risk_index_quantile <- donor_risk_index_test_data %>% 
+  group_by(pred_probs_quantile) %>% 
+  summarize(n = sum(n),
+            dri_min = min(dri),
+            dri_max = max(dri),
+            outcome_risk_pred = mean(pred_probs),
+            outcome_risk_obs = mean(outcome)) %>% 
+  ungroup()
+
+# Estimate observed and predicted risk by donor risk score
+donor_risk_index_points <- donor_risk_index_test_data %>% 
+  group_by(dri) %>% 
+  summarize(n = sum(n),
+            outcome_risk_pred = mean(pred_probs),
+            outcome_risk_obs = mean(outcome)) %>% 
+  ungroup()
+
+# Estimate correlation between DRI-predicted and observed risk by QUANTILE of 
+# DRI-predicted risk
+corr_spearman <- cor(donor_risk_index_quantile$outcome_risk_pred, 
+                     donor_risk_index_quantile$outcome_risk_obs, 
+                     method = "spearman")
+
+corr_pearson <- cor(donor_risk_index_quantile$outcome_risk_pred, 
+                    donor_risk_index_quantile$outcome_risk_obs, 
+                    method = "pearson")
+
+dri_corr_risk <- as.data.frame(cbind(corr_pearson, corr_spearman))
+dri_corr_risk
+
+# Histogram of donor risk index 
+fig_dri_histogram_test <- ggplot(data = donor_risk_index_test_data) + 
+  geom_histogram(aes(x = dri), binwidth = 0.5) + 
+  xlab("Donor Risk Index") + ylab("Frequency") +
+  scale_x_continuous(limits = c(-11, 12), breaks = seq(-11, 12, 1)) 
+
+summary(donor_risk_index_test_data$dri)
+
 # Output ----
+
+## DRI Distribution ----
+write.csv(dri_summary, 
+          file = paste0(DIR_OUTPUT, "DRI Summary Statistics.csv"),
+          row.names = FALSE)
+
+## DRI by Quartile ----
+donor_risk_index_quantile_clean <- donor_risk_index_quantile %>% 
+  rename(`DRI-Predicted Risk Quartile` = pred_probs_quantile,
+         `Mean Predicted Risk` = outcome_risk_pred,
+         `Mean Observed Risk` = outcome_risk_obs) 
+
+write.csv(donor_risk_index_quantile_clean, 
+          file = paste0(DIR_OUTPUT, "Predicted and Observed Risk by Quantile.csv"),
+          row.names = FALSE)
+
+## DRI by Points ----
+donor_risk_index_points_clean <- donor_risk_index_points %>% 
+  rename(`Mean Predicted Risk` = outcome_risk_pred,
+         `Mean Observed Risk` = outcome_risk_obs,
+         `Donor Risk Index` = dri)
+
+write.csv(donor_risk_index_points_clean, 
+          file = paste0(DIR_OUTPUT, "Predicted and Observed Risk by DRI Points.csv"),
+          row.names = FALSE)
+
+## DRI Correlation to Observed Risk ----
+write.csv(dri_corr_risk, 
+          file = paste0(DIR_OUTPUT, "Correlation of DRI-Predicted and Observed Risk.csv"),
+          row.names = FALSE)
+
+## DRI Histogram in Test Dataset -----
+ggsave(paste0(DIR_OUTPUT, "Figure - DRI Histogram in Test Dataset.pdf"),
+       plot = fig_dri_histogram_test)
+
 
 ## Coefficients ----
 
@@ -1127,6 +1302,16 @@ write.csv(coefficients_clean,
           file = paste0(DIR_OUTPUT, "Model Coefficients.csv"),
           row.names = FALSE)
 
+## Marginalized Donor Factors in MLE Logit Model -----
+coef_mle_logit_marg_clean <- as.data.frame(coef_mle_logit_marg) %>% 
+  rownames_to_column() %>% 
+  rename(coef_mle_logit_marg = V1,
+         variable = rowname)
+
+write.csv(coef_mle_logit_marg_clean, 
+          file = paste0(DIR_OUTPUT, "Marginalized Model Coefficients for DRI.csv"),
+          row.names = FALSE)
+
 ## All Model Performance Metrics ----
 performance_clean <- as.data.frame(rbind(perf_lasso_logit, 
                                          perf_ridge_logit, 
@@ -1139,16 +1324,16 @@ write.csv(performance_clean,
           row.names = FALSE)
 
 # Final Model Performance by Cutoff
-write.csv(metrics_mle_logit, 
+write.csv(metrics_lasso_logit, 
           file = paste0(DIR_OUTPUT, "Final Model Performance Metrics.csv"),
           row.names = FALSE)
 
 # ROC and Precision-Recall Plots 
-ggsave(paste0(DIR_OUTPUT, "Figure - ROC Curve MLE Logit.pdf"),
-       plot = fig_auc_mle_logit)
+ggsave(paste0(DIR_OUTPUT, "Figure - ROC Curve Final Model.pdf"),
+       plot = fig_auc_final_logit)
 
-ggsave(paste0(DIR_OUTPUT, "Figure - Precision Recall Curve MLE Logit.pdf"),
-       plot = fig_prerec_mle_logit)
+ggsave(paste0(DIR_OUTPUT, "Figure - Precision Recall Curve Final Model.pdf"),
+       plot = fig_prerec_final_logit)
 
 ## Baseline Tables & Variable Summary----
 ### After Imputation ----
