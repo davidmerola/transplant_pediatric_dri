@@ -155,9 +155,12 @@ marginal_prob <- function(data, model, vars_marg, vars_sum) {
 # Convert files to lower-memory .RData format
 # data_liver <- read_dta(paste0(DIR_RAW_DATA, "Liver/LIVER_DATA.DTA"))
 # save(data_liver, file = paste0(DIR_DATA, "liver_data.RData"))
+# data_age_months <- read_sas(paste0(DIR_RAW_DATA, "Liver/data0014198_Merola/liver_non_std.sas7bdat"))
+# save(data_age_months, file = paste0(DIR_DATA, "age_months.RData"))
 
 # Load .RData files
 load(file = paste0(DIR_DATA, "liver_data.RData"))
+load(file = paste0(DIR_DATA, "age_months.RData"))
 
 formats <- read.delim(paste0(DIR_FORMATS, "LIVER_FORMATS_FLATFILE.DAT"), 
                       header = FALSE, 
@@ -1225,12 +1228,101 @@ fig_dri_histogram_test <- ggplot(data = donor_risk_index_test_data) +
 
 summary(donor_risk_index_test_data$dri)
 
-# Output ----
+## Plots: Select Donor Factors vs. Predicted Risk -----
+# Plot relationship between predicted risk (using DRI model) vs: year of age, 
+# cause of death, organ type, organ share type in ENTIRE cohort (training + testing)
 
-## DRI Distribution ----
-write.csv(dri_summary, 
-          file = paste0(DIR_OUTPUT, "DRI Summary Statistics.csv"),
-          row.names = FALSE)
+# Create data table containing select donor factors and the outcome
+data_final_figs <- data_liver_cohort %>% 
+  
+  # Merge age_in_months variable
+  left_join(data_age_months, by = join_by("trr_id_code" == "TRR_ID_CODE")) %>% 
+  
+  # Extract numeric age variable from (uncleaned) cohort file
+  filter(pt_code %in% data_imputed_1_cc$pt_code) %>% 
+  select(pt_code, age = elig_age, age_months = AGE_IN_MONTHS) %>% 
+  
+  # Add variables of interest
+  mutate(predicted_outcome = predict(model_mle_logit_marg, 
+                                     type = 'response', 
+                                     newdata = data_imputed_1_cc),
+         cov_death_mech_don = data_imputed_1_cc$cov_death_mech_don,
+         cov_tx_procedur_ty = data_imputed_1_cc$cov_tx_procedur_ty,
+         cov_share_ty = data_imputed_1_cc$cov_share_ty,
+         age_months = factor(case_when(age_months %in% c(0:5) ~ "0-5",
+                                age_months %in% c(6:11) ~ "6-11",
+                                age_months %in% c(12:17) ~ "12-17",
+                                age_months %in% c(18:23) ~ "18-23",
+                                age_months %in% c(24:29) ~ "24-29",
+                                age_months %in% c(30:36) ~ "30-36",
+                                TRUE ~ NA_character_),
+                             levels = c("0-5","6-11","12-17","18-23","24-29","30-36"))) %>% 
+  select(pt_code, predicted_outcome, everything())
+     
+#### Age (Years) vs. Predicted Risk -----
+fig_age_v_pred_risk <- ggplot(data_final_figs, aes(x = factor(age), y = 100 * predicted_outcome)) +
+  stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
+  labs(title = "",
+       x = "Age (Years)",
+       y = "Graft Failure or Mortality (%)",
+       caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
+  geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome), color = "red", linetype = "dashed", size = 0.5) + 
+  theme_minimal() + 
+  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"))
+
+#### Age (Months) vs. Predicted Risk -----
+fig_age_mon_v_pred_risk <- ggplot(filter(data_final_figs, !is.na(age_months)), # removing NA's
+                                  aes(x = age_months, y = 100 * predicted_outcome)) +
+  stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
+  labs(title = "",
+       x = "Age (Months)",
+       y = "Graft Failure or Mortality (%)",
+       caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
+  theme_minimal() + 
+  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"))
+
+#### Death Mechanism vs. Predicted Risk -----
+fig_death_mech_v_pred_risk <- ggplot(data_final_figs, aes(x = reorder(cov_death_mech_don, predicted_outcome, FUN = mean), y = 100 * predicted_outcome)) +
+  stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
+  labs(title = "",
+       x = "Cause of Death Mechanism",
+       y = "Graft Failure or Mortality (%)",
+       caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
+  geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome), color = "red", linetype = "dashed", size = 0.5) + 
+  theme_minimal() + 
+  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+#### Liver Organ Type vs. Predicted Risk ----
+fig_tx_proc_ty_v_pred_risk <- ggplot(data_final_figs, aes(x = reorder(cov_tx_procedur_ty, predicted_outcome, FUN = mean), y = 100 * predicted_outcome)) +
+  stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
+  labs(title = "",
+       x = "Liver Organ Type",
+       y = "Graft Failure or Mortality (%)",
+       caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
+  geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome), color = "red", linetype = "dashed", size = 0.5) + 
+  theme_minimal() + 
+  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+#### Organ Share Type vs. Predicted Risk ----
+fig_share_ty_v_pred_risk <- ggplot(data_final_figs, aes(x = reorder(cov_share_ty, predicted_outcome, FUN = mean), y = 100 * predicted_outcome)) +
+  stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
+  labs(title = "",
+       x = "Organ Share Type",
+       y = "Graft Failure or Mortality (%)",
+       caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
+  geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome), color = "red", linetype = "dashed", size = 0.5) + 
+  theme_minimal() + 
+  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Output ----
 
 ## DRI by Quartile ----
 donor_risk_index_quantile_clean <- donor_risk_index_quantile %>% 
@@ -1260,6 +1352,22 @@ write.csv(dri_corr_risk,
 ## DRI Histogram in Test Dataset -----
 ggsave(paste0(DIR_OUTPUT, "Figure - DRI Histogram in Test Dataset.pdf"),
        plot = fig_dri_histogram_test)
+
+## Select Factors vs. Predicted Risk of Graft Failure Figures -----
+ggsave(paste0(DIR_OUTPUT, "Figure - Age vs Predicted Risk.pdf"),
+       plot = fig_age_v_pred_risk, height = 4.26, width = 6)
+
+ggsave(paste0(DIR_OUTPUT, "Figure - Age (Months) vs Predicted Risk.pdf"),
+       plot = fig_age_mon_v_pred_risk, height = 4.26, width = 6)
+
+ggsave(paste0(DIR_OUTPUT, "Figure - COD Mechanism vs Predicted Risk.pdf"),
+       plot = fig_death_mech_v_pred_risk, height = 4.26, width = 6)
+
+ggsave(paste0(DIR_OUTPUT, "Figure - Organ Type vs Predicted Risk.pdf"),
+       plot = fig_tx_proc_ty_v_pred_risk, height = 4.26, width = 6)
+
+ggsave(paste0(DIR_OUTPUT, "Figure - Organ Share Type vs Predicted Risk.pdf"),
+       plot = fig_share_ty_v_pred_risk, height = 4.26, width = 6)
 
 
 ## Coefficients ----
