@@ -1254,9 +1254,10 @@ data_final_figs <- data_liver_cohort %>%
                                 age_months %in% c(12:17) ~ "12-17",
                                 age_months %in% c(18:23) ~ "18-23",
                                 age_months %in% c(24:29) ~ "24-29",
-                                age_months %in% c(30:36) ~ "30-36",
+                                age_months %in% c(30:35) ~ "30-35",
                                 TRUE ~ NA_character_),
-                             levels = c("0-5","6-11","12-17","18-23","24-29","30-36"))) %>% 
+                             levels = c("0-5","6-11","12-17","18-23","24-29",
+                                        "30-35"))) %>% 
   select(pt_code, predicted_outcome, everything())
      
 #### Age (Years) vs. Predicted Risk -----
@@ -1272,7 +1273,17 @@ fig_age_v_pred_risk <- ggplot(data_final_figs, aes(x = factor(age), y = 100 * pr
   theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"))
 
 #### Age (Months) vs. Predicted Risk -----
-fig_age_mon_v_pred_risk <- ggplot(filter(data_final_figs, !is.na(age_months)), # removing NA's
+x_axis_counts <- data_final_figs %>%
+  filter(!is.na(age_months)) %>%
+  group_by(age_months) %>%
+  summarize(n = n())
+
+# Create a custom function get sample sizes in labels
+custom_labels <- x_axis_counts %>%
+  mutate(label = paste0(age_months, "\n(n=", n, ")"))
+
+# Merge custom labels into the plot
+fig_age_mon_v_pred_risk <- ggplot(filter(data_final_figs, !is.na(age_months)),
                                   aes(x = age_months, y = 100 * predicted_outcome)) +
   stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
   stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
@@ -1280,8 +1291,12 @@ fig_age_mon_v_pred_risk <- ggplot(filter(data_final_figs, !is.na(age_months)), #
        x = "Age (Months)",
        y = "Graft Failure or Mortality (%)",
        caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
-  theme_minimal() + 
-  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic"))
+  geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome, na.rm = TRUE),
+             color = "red", linetype = "dashed", size = 0.5) +
+  theme_minimal() +
+  theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic")) +
+  scale_x_discrete(breaks = x_axis_counts$age_months,  # Ensure all age_months are on the axis
+                   labels = custom_labels$label)  # Add custom labels with sample size
 
 #### Death Mechanism vs. Predicted Risk -----
 fig_death_mech_v_pred_risk <- ggplot(data_final_figs, aes(x = reorder(cov_death_mech_don, predicted_outcome, FUN = mean), y = 100 * predicted_outcome)) +
