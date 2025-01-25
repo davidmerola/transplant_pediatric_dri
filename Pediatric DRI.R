@@ -9,6 +9,7 @@ rm(list = ls())
 # Constants ----
 # Specify directories
 DIR_RAW_DATA <- "~/OneDrive/Research/UNOS Data/STAR_STATA/SAS Export to STATA 202403/"
+DIR_RAW_AGE_DATA <- "~/OneDrive/Research/UNOS Data/data0014198_Merola/"
 DIR_FORMATS <- "~/OneDrive/Research/UNOS Data/STAR_STATA/CODE DICTIONARY - FORMATS 202403/Liver/"
 DIR_DATA <- "~/OneDrive/Research/Transplant DRI/Data/"
 DIR_OUTPUT <- "~/OneDrive/Research/Transplant DRI/Output/"
@@ -155,12 +156,12 @@ marginal_prob <- function(data, model, vars_marg, vars_sum) {
 # Convert files to lower-memory .RData format
 # data_liver <- read_dta(paste0(DIR_RAW_DATA, "Liver/LIVER_DATA.DTA"))
 # save(data_liver, file = paste0(DIR_DATA, "liver_data.RData"))
-# data_age_months <- read_sas(paste0(DIR_RAW_DATA, "Liver/data0014198_Merola/liver_non_std.sas7bdat"))
-# save(data_age_months, file = paste0(DIR_DATA, "age_months.RData"))
+# data_age_don_months <- read_sas(paste0(DIR_RAW_AGE_DATA, "deceased_donor_non_std.sas7bdat"))
+# save(data_age_don_months, file = paste0(DIR_DATA, "age_don_months.RData"))
 
 # Load .RData files
 load(file = paste0(DIR_DATA, "liver_data.RData"))
-load(file = paste0(DIR_DATA, "age_months.RData"))
+load(file = paste0(DIR_DATA, "age_don_months.RData"))
 
 formats <- read.delim(paste0(DIR_FORMATS, "LIVER_FORMATS_FLATFILE.DAT"), 
                       header = FALSE, 
@@ -1236,11 +1237,11 @@ summary(donor_risk_index_test_data$dri)
 data_final_figs <- data_liver_cohort %>% 
   
   # Merge age_in_months variable
-  left_join(data_age_months, by = join_by("trr_id_code" == "TRR_ID_CODE")) %>% 
+  left_join(data_age_don_months, by = join_by("donor_id" == "DONOR_ID")) %>% 
   
   # Extract numeric age variable from (uncleaned) cohort file
   filter(pt_code %in% data_imputed_1_cc$pt_code) %>% 
-  select(pt_code, age = elig_age, age_months = AGE_IN_MONTHS) %>% 
+  select(pt_code, age_don = elig_age_don, age_don_months = AGE_IN_MONTHS) %>% 
   
   # Add variables of interest
   mutate(predicted_outcome = predict(model_mle_logit_marg, 
@@ -1249,23 +1250,23 @@ data_final_figs <- data_liver_cohort %>%
          cov_death_mech_don = data_imputed_1_cc$cov_death_mech_don,
          cov_tx_procedur_ty = data_imputed_1_cc$cov_tx_procedur_ty,
          cov_share_ty = data_imputed_1_cc$cov_share_ty,
-         age_months = factor(case_when(age_months %in% c(0:5) ~ "0-5",
-                                age_months %in% c(6:11) ~ "6-11",
-                                age_months %in% c(12:17) ~ "12-17",
-                                age_months %in% c(18:23) ~ "18-23",
-                                age_months %in% c(24:29) ~ "24-29",
-                                age_months %in% c(30:35) ~ "30-35",
-                                TRUE ~ NA_character_),
+         age_don_months = factor(case_when(age_don_months %in% c(0:5) ~ "0-5",
+                                       age_don_months %in% c(6:11) ~ "6-11",
+                                       age_don_months %in% c(12:17) ~ "12-17",
+                                       age_don_months %in% c(18:23) ~ "18-23",
+                                       age_don_months %in% c(24:29) ~ "24-29",
+                                       age_don_months %in% c(30:35) ~ "30-35",
+                                       TRUE ~ NA_character_),
                              levels = c("0-5","6-11","12-17","18-23","24-29",
                                         "30-35"))) %>% 
   select(pt_code, predicted_outcome, everything())
      
 #### Age (Years) vs. Predicted Risk -----
-fig_age_v_pred_risk <- ggplot(data_final_figs, aes(x = factor(age), y = 100 * predicted_outcome)) +
+fig_age_v_pred_risk <- ggplot(data_final_figs, aes(x = factor(age_don), y = 100 * predicted_outcome)) +
   stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
   stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
   labs(title = "",
-       x = "Age (Years)",
+       x = "Donor Age (Years)",
        y = "Graft Failure or Mortality (%)",
        caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
   geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome), color = "red", linetype = "dashed", size = 0.5) + 
@@ -1274,28 +1275,28 @@ fig_age_v_pred_risk <- ggplot(data_final_figs, aes(x = factor(age), y = 100 * pr
 
 #### Age (Months) vs. Predicted Risk -----
 x_axis_counts <- data_final_figs %>%
-  filter(!is.na(age_months)) %>%
-  group_by(age_months) %>%
+  filter(!is.na(age_don_months)) %>%
+  group_by(age_don_months) %>%
   summarize(n = n())
 
 # Create a custom function get sample sizes in labels
 custom_labels <- x_axis_counts %>%
-  mutate(label = paste0(age_months, "\n(n=", n, ")"))
+  mutate(label = paste0(age_don_months, "\n(n=", n, ")"))
 
 # Merge custom labels into the plot
-fig_age_mon_v_pred_risk <- ggplot(filter(data_final_figs, !is.na(age_months)),
-                                  aes(x = age_months, y = 100 * predicted_outcome)) +
+fig_age_mon_v_pred_risk <- ggplot(filter(data_final_figs, !is.na(age_don_months)),
+                                  aes(x = age_don_months, y = 100 * predicted_outcome)) +
   stat_summary(fun = mean, geom = "point", size = 1) +  # Plot mean
   stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +  # Plot standard error
   labs(title = "",
-       x = "Age (Months)",
+       x = "Donor Age (Months)",
        y = "Graft Failure or Mortality (%)",
        caption = "Note: Estimates shown are means and standard errors calculated in entire cohort.") +
   geom_hline(yintercept = 100 * mean(data_final_figs$predicted_outcome, na.rm = TRUE),
              color = "red", linetype = "dashed", size = 0.5) +
   theme_minimal() +
   theme(plot.caption = element_text(hjust = 0, size = 10, face = "italic")) +
-  scale_x_discrete(breaks = x_axis_counts$age_months,  # Ensure all age_months are on the axis
+  scale_x_discrete(breaks = x_axis_counts$age_don_months,  # Ensure all age_months are on the axis
                    labels = custom_labels$label)  # Add custom labels with sample size
 
 #### Death Mechanism vs. Predicted Risk -----
@@ -1369,10 +1370,10 @@ ggsave(paste0(DIR_OUTPUT, "Figure - DRI Histogram in Test Dataset.pdf"),
        plot = fig_dri_histogram_test)
 
 ## Select Factors vs. Predicted Risk of Graft Failure Figures -----
-ggsave(paste0(DIR_OUTPUT, "Figure - Age vs Predicted Risk.pdf"),
+ggsave(paste0(DIR_OUTPUT, "Figure - Donor Age vs Predicted Risk.pdf"),
        plot = fig_age_v_pred_risk, height = 4.26, width = 6)
 
-ggsave(paste0(DIR_OUTPUT, "Figure - Age (Months) vs Predicted Risk.pdf"),
+ggsave(paste0(DIR_OUTPUT, "Figure - Donor Age (Months) vs Predicted Risk.pdf"),
        plot = fig_age_mon_v_pred_risk, height = 4.26, width = 6)
 
 ggsave(paste0(DIR_OUTPUT, "Figure - COD Mechanism vs Predicted Risk.pdf"),
